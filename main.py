@@ -26,11 +26,18 @@ import json
 import sqlite3
 import pandas as pd
 import numpy as np
+import pickle as pkl
+from collections import defaultdict
 from sklearn.cluster import KMeans
 
 filename = r'allrecipes-recipes.json'
 DBNAME = 'recipes.db'
 ingredient_results = r'/Users/jonathanhori/ingredient-phrase-tagger-master/results.json'
+ingredient_dict_path = 'ingredient_dict.pkl'
+#ingredient_dict = pkl.load(open(ingredient_dict_path, 'rb'))
+#ingredients = read_data_from_sql('ingredients', 'ingredients')
+#ingredients_parsed_frame = read_data_from_sql('ingredients_parsed', 'ingredients_parsed')
+
 
 def export_data_to_sql(table, table_name):
     conn = sqlite3.connect(DBNAME)
@@ -40,12 +47,22 @@ def export_data_to_sql(table, table_name):
 def read_data_from_sql(table, table_name):
     conn = sqlite3.connect(DBNAME)
     cursor = conn.cursor()
+    
+    name_query = 'PRAGMA table_info({})'.format(table_name)
+    cursor.execute(name_query)
+    names = cursor.fetchall()   
+    
+    table_cols = [x[1] for x in names]
+
     query = 'SELECT * FROM {};'.format(table_name)
     cursor.execute(query)
     table = cursor.fetchall()
+    frame = pd.DataFrame(table, columns=table_cols)
+    frame = frame.drop('index', axis=1)
+    
     cursor.close()
     conn.close()
-    return table
+    return frame
 
 def load_data(filename):
     with open(filename) as file:
@@ -67,7 +84,6 @@ Index(['author', 'cook_time_minutes', 'description', 'error', 'footnotes',
        'rating_stars', 'review_count', 'time_scraped', 'title',
        'total_time_minutes', 'url'],
       dtype='object')
-
 
 '''
 
@@ -125,36 +141,42 @@ def parse_ingredients(ingredients):
     # /Users/jonathanhori/ingredient-phrase-tagger-master/results.json
     
     # ingredients.iloc[:,-1].to_csv(r'ingredient_data_new.txt', 
-     #               header=None, index=None, sep=' ', mode='a')
+    #               header=None, index=None, sep=' ', mode='a')
     
     with open(ingredient_results) as file:
         ingredients_parsed = json.load(file)
+        
+    def clean(name):
+        ingredients_parsed_frame[name] = ingredients_parsed_frame[name].str.strip('\"')
+        
     ingredients_parsed_frame = pd.DataFrame(ingredients_parsed)
-    ingredients_parsed_frame.input = ingredients_parsed_frame.input.str.strip('\"')
-    ingredients_parsed_frame.qty = ingredients_parsed_frame.qty.str.strip('\"')
-    ingredients_parsed_frame.name = ingredients_parsed_frame.name.str.strip('\"')
-    ingredients_parsed_frame.comment = ingredients_parsed_frame.comment.str.strip('\"')
+    clean('input')
+    clean('qty')
+    clean('name')
+    clean('comment')
+    
+#    ingredients_parsed_frame.input = ingredients_parsed_frame.input.str.strip('\"')
+#    ingredients_parsed_frame.qty = ingredients_parsed_frame.qty.str.strip('\"')
+#    ingredients_parsed_frame.name = ingredients_parsed_frame.name.str.strip('\"')
+#    ingredients_parsed_frame.comment = ingredients_parsed_frame.comment.str.strip('\"')
     ingredients_parsed_frame = ingredients_parsed_frame.drop('display', axis=1)
 
     export_data_to_sql(ingredients_parsed_frame, 'ingredients_parsed')
-    
-#    ingredients_merged = ingredients.join(ingredients_parsed_frame)
+    d = defaultdict()
+    ingredient_dict = ingredients_parsed_frame[['input', 'name']] \
+                            .set_index('input').T.to_dict(into=d)
+    pkl.dump(ingredient_dict, open(ingredient_dict_path, 'wb'))
 
-#    np.array_equal(ingredients_merged.input, 
-#                   ingredients_merged.ingredient)
-#    # This is false, need to merge on ingredient==input
-##    ingredients_merged = ingredients.merge(ingredients_parsed_frame, 
-##                                           left_on='ingredient', 
-##                                           right_on='input')
-#    
-#    export_data_to_sql(ingredients_parsed_frame, 'ingredients_parsed')
     return ingredients_parsed_frame
     
-def setup_for_analysis():
-    return
+def setup_for_analysis(ingredients, ingredient_dict):
+    ingredients['item'] = ingredients.ingredient \
+                                .apply((lambda x: ingredient_dict.get(x, {}).get('name', None)))
+    export_data_to_sql(ingredients, 'ingredient_items')
+    return ingredients
     
 
-
+#select ingredients.id, ingredients.ingredient, ingredients_parsed.name, ingredients_parsed.input from ingredients inner join ingredients_parsed on ingredients.ingredient = ingredients_parsed.input limit 10;
 
     
 
